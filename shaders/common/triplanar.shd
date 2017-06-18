@@ -1,0 +1,126 @@
+[Vertex shader]
+
+#version 150
+
+#include triplanar_vs.inl
+
+[Fragment shader]
+
+#version 150
+
+uniform sampler2DArray baseTex;
+uniform sampler2D sideTex;
+uniform sampler2D alphaTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+in vec3 norm;
+uniform vec3 lightVec;
+
+in vec2 texCoord0;
+in vec2 texCoord1;
+
+in vec4 pixelPos;
+in vec4 vAdjustPosition;
+in vec4 vLocalPosition;
+
+uniform float specPower;
+uniform float specIntensity;
+uniform vec4 lightColor;
+uniform vec4 lightAmbient;
+
+#include shadow_frag_terrain.inl
+#include deferred.inl
+#include piecewiseblend.inl
+
+void main()
+{	
+	WriteOutPositionAndNormals();
+	
+	vec3 normal = normalize(norm);
+	float scale = 0.019;
+   
+	vec4 vAdjustedPosition = vAdjustPosition * scale;
+	vec4 vAdjustedPosition23 = vAdjustedPosition;
+	vec4 vAdjustedPosition14 = vAdjustedPosition * 0.25;
+
+	float tighten = 0.4679; 
+	
+	vec3 blendweights = abs(normal) - tighten;
+	blendweights = max(blendweights, 0);
+   
+	float mXY = blendweights.z;
+	float mXZ = blendweights.y; 
+	float mYZ = blendweights.x; 
+   
+	float total = 1.0 / (mXY + mXZ + mYZ);
+	mXZ *= total;
+	
+	float sideTotal = 1.0 / max((mXY + mYZ), 0.0001);
+	mXY *= sideTotal;
+	mYZ *= sideTotal;
+   
+   // need scale to be such that 8 units over is one texture
+	
+	vec4 cXZ = texture(baseTex, vec3(vAdjustedPosition.x, vAdjustedPosition.z , 0.0));
+	vec4 cXY = texture(baseTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 1.0));
+	vec4 cYZ = texture(baseTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 1.0));
+
+	vec4 blendTexel = texture(alphaTex, texCoord1);	
+	if (blendTexel.g > 0)
+	{
+		vec4 cXZ1 = texture(baseTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 2.0));   
+		vec4 cXY1 = texture(baseTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 3.0));
+		vec4 cYZ1 = texture(baseTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 3.0));	
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel.g);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel.g);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel.g);
+	}
+
+	if (blendTexel.b > 0)
+	{
+		vec4 cXZ1 = texture(baseTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 4.0));
+		vec4 cXY1 = texture(baseTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 5.0));
+		vec4 cYZ1 = texture(baseTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 5.0));
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel.b);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel.b);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel.b);
+	}
+
+	if (blendTexel.a > 0)
+	{	
+		vec4 cXZ1 = texture(baseTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 4.0));
+		vec4 cXY1 = texture(baseTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 7.0));
+		vec4 cYZ1 = texture(baseTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 7.0));
+
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel.a);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel.a);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel.a);
+	}	
+
+	//vec4 baseTexel = cXY * mXY + cXZ * mXZ + cYZ * mYZ;
+
+	vec4 baseTexel = piecewiseBlend(cXZ, cXY * mXY + cYZ * mYZ, mXZ);
+	
+	// smoothen the result a bit, to avoid aliasing at shadow contact point
+	// FIXME: Divide by W?
+
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);	
+	float shadow = PCFShadowMap(lightCoords);
+	normalBuffer.w = shadow;
+//	vec4 light = saturate(saturate(PCFShadowMap(lightCoords)+0.25) * saturate(dot(eyeNormal, lightVec)) * lightColor);
+	
+	albedoBuffer = getGrid(baseTexel, vAdjustPosition.xyz, norm);
+	albedoBuffer.w = 0.0;
+
+	glowBuffer = vec4(0.0, 0.0, 0.0, 1.0);
+	specInteriorBuffer = vec4(0.0, 0.0, 0.0, 1.0);
+	// I don't remember what goes into the other things.			
+
+}

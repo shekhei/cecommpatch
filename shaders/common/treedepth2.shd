@@ -1,0 +1,47 @@
+[Vertex shader]
+
+varying vec3 norm;
+uniform vec3 scaleFactor;
+varying vec4 outPos;
+uniform float timer;
+
+void main()
+{
+	vec4 vertex = gl_Vertex;
+	vertex.x += sin(timer)*0.05 * pow(vertex.y / 16.0, 2.0);
+	vertex.z += cos(timer*0.8)*0.04 * pow(vertex.y / 16.0, 2.0);
+	gl_Position = gl_ModelViewProjectionMatrix * vertex;
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+	outPos = gl_Position;
+}
+
+[Fragment shader]
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform vec3 lightPos;
+uniform vec3 camPos;
+uniform sampler2D baseTex;
+
+uniform float ambient;
+uniform sampler2D influenceTex;
+
+varying vec4 outPos;
+
+void main()
+{	
+	vec4 baseTexel = texture(baseTex, vec2(gl_TexCoord[0]));
+   if (baseTexel.w < 0.1) { discard; } 
+
+   float z = (outPos.z) / outPos.w;
+   float depth = z * 0.5 + 0.5;
+    
+   float dx = dFdx(depth);
+   float dy = dFdy(depth);
+   float bias = 0.25 * (dx*dx+dy*dy);
+   
+   vec4 lightColor = vec4(depth, depth, depth, depth);
+   
+   gl_FragColor = lightColor;
+}

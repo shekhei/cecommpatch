@@ -1,0 +1,62 @@
+[Vertex shader]
+
+out vec3 norm;
+out vec3 view;
+uniform vec3 scaleFactor;
+
+void main()
+{
+	gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+
+	// Lighting vectors
+
+	norm = mat3(RENDGL_MODELVIEWMatrix) * gl_Normal;
+	view = -normalize(RENDGL_MODELVIEWMatrix * gl_Vertex);
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+	gl_TexCoord[1] = gl_MultiTexCoord1;
+}
+
+[Fragment shader]
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform vec3 lightPos;
+uniform vec3 camPos;
+uniform sampler2D baseTex;
+
+uniform float ambient;
+uniform sampler2D influenceTex;
+
+in vec3 norm;
+in vec3 view;
+
+void main()
+{	
+   vec4 baseTexel = texture(baseTex, vec2(gl_TexCoord[0]));
+
+   // do lighting
+
+   vec3 lightVec = lightPos;
+
+   // lightPos is in camera space
+   // camPos is in object space
+   
+   vec3 viewVec = view;
+   vec3 normal = normalize(norm);
+   vec3 reflect = normalize((2 * dot(normal, lightVec) * normal) - lightVec);
+   float specular =  saturate(pow(max(0, dot(reflect, viewVec)), 5));
+
+   float shiny = saturate(saturate(dot(normal, lightVec)));
+
+   // quantize to 5 steps (0, .25, .5, .75 and 1)
+
+   shiny = (floor(shiny * 4.0) + 1.0)/4.0;
+
+   vec4 lightColor = vec4(1.0,1.0, 1.0, 1.0); 
+   
+   gl_FragColor.xyz = baseTexel;
+
+   gl_FragColor[3] = 1.0;
+
+}

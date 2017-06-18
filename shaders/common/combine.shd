@@ -1,0 +1,227 @@
+[Vertex shader]
+#version 150
+#extension GL_ARB_explicit_attrib_location : require
+
+layout (location=1) in vec3 position;
+layout (location=2) in vec2 texCoord;
+
+out vec4 outPosition;
+out vec2 texCoord0;
+
+void main()
+{
+
+	gl_Position = vec4(position.xyz,1);
+	outPosition = gl_Position;
+	texCoord0 = texCoord;
+}
+
+[Fragment shader]
+
+#version 150
+#extension GL_ARB_explicit_attrib_location: require
+
+layout (location = 0) out vec4 finalColor;
+
+uniform mat4 projectionMatrixInverse;
+uniform mat4 modelviewMatrixInverse;
+uniform mat4 modelViewMatrix;
+
+uniform sampler2D albedoMapTex;
+uniform sampler2D normalsTex;
+uniform sampler2D pixelPosTex;
+uniform sampler2D aoTex;
+uniform sampler2D reflectionTex;
+uniform sampler2D waterRippleTex;
+uniform sampler2D fogOfWarAndWaterColors;
+uniform sampler2D fogMap;
+uniform sampler2D diffuseAccumulationTex;
+uniform sampler2D specularAccumulationTex;
+uniform sampler2D specularInfoTex;
+
+uniform float timer;
+uniform bool gamePaused;
+float baseWaterHeight = 19.9;
+uniform vec2 worldDimensions;
+uniform vec3 viewerPos;
+uniform vec4 outlineColor;
+uniform float screenWidth;
+uniform float screenHeight;
+uniform vec3 lightVec;
+uniform vec4 lightColor;
+uniform vec4 lightAmbient;
+uniform mat4 invProjectionMatrix;
+
+in vec2 texCoord0;
+float totStrength = 1.38;
+float strength = 0.07;
+float offset = 18.0;
+float falloff = 0.000002;
+float rad = 0.006;
+
+#define SAMPLES 16 // 10 is good
+#define saturate(x) clamp(x,0.0,1.0)
+
+const float invSamples = 1.0/16.0;
+
+vec4 xColor = vec4(1.0, 0.0, 0.0, 1.0);
+vec4 yColor = vec4(0.0, 1.0, 0.0, 1.0);
+vec4 zColor = vec4(0.0, 1.0, 1.0, 1.0);
+vec4 wColor = vec4(1.0, 1.0, 1.0, 1.0);
+
+vec4 modVecs = vec4(4.0, 8.0, 16.0, 32.0);
+vec4 expandVecs = vec4(2.0, 4.0, 8.0, 16.0);
+
+vec4 ComputeSobel ()
+{
+	float hp = 1.0 / screenWidth;
+	float vp = 1.0 / screenHeight;
+
+	vec4 sobelSample00 = vec4(greaterThanEqual(mod(texture(albedoMapTex,texCoord0 + vec2(-hp, vp)).wwww, modVecs),expandVecs));
+	vec4 sobelSample01 = vec4(greaterThanEqual(mod(texture(albedoMapTex,texCoord0 + vec2(0,vp)).wwww, modVecs),expandVecs));
+	vec4 sobelSample02 = vec4(greaterThanEqual(mod(texture(albedoMapTex,texCoord0 + vec2(hp,vp)).wwww, modVecs),expandVecs));
+	vec4 sobelSample10 = vec4(greaterThanEqual(mod(texture(albedoMapTex,texCoord0 + vec2(-hp, 0)).wwww, modVecs),expandVecs));
+	vec4 sobelSample12 = vec4(greaterThanEqual(mod(texture(albedoMapTex,texCoord0 + vec2(hp, 0)).wwww, modVecs),expandVecs));
+	vec4 sobelSample20 = vec4(greaterThanEqual(mod(texture(albedoMapTex,texCoord0 + vec2(-hp, -vp)).wwww, modVecs),expandVecs));
+	vec4 sobelSample21 = vec4(greaterThanEqual(mod(texture(albedoMapTex,texCoord0 + vec2(0,-vp)).wwww, modVecs),expandVecs));
+	vec4 sobelSample22 = vec4(greaterThanEqual(mod(texture(albedoMapTex,texCoord0 + vec2(hp,-vp)).wwww, modVecs),expandVecs));
+
+// tangent, binormal, normal
+// tangent is x, binormal is z, normal is y
+
+	vec4 sobel = abs(sobelSample00 + 2.0 * sobelSample01 + sobelSample02 -(sobelSample20 + 2.0 * sobelSample21 + sobelSample22)) + 
+	abs(sobelSample00 + 2.0 * sobelSample10 + sobelSample20 -(sobelSample02 + 2.0 * sobelSample12 + sobelSample22));
+	sobel = clamp(sobel, 0.0, 1.0);
+
+	return (sobel.x * xColor + sobel.y * yColor + sobel.z * zColor + sobel.w * wColor);
+
+}
+
+
+void main(void)
+{	
+	float waterHeight = baseWaterHeight;
+	vec4 sobel = ComputeSobel();
+
+	vec4 pixelPos = texture(pixelPosTex,texCoord0);
+	if (pixelPos.r == 1.0)
+	{
+		finalColor = vec4(0,0,0,0);
+		return;
+	}
+	pixelPos.b = pixelPos.r;
+	pixelPos.r = gl_FragCoord.x / screenWidth;
+	pixelPos.g = gl_FragCoord.y / screenHeight;
+	pixelPos *= 2.0;
+	pixelPos -= 1.0;
+	pixelPos.w = 1.0;
+
+	vec2 box = vec2(1.0,1.0);
+	vec2 d2 = abs(pixelPos.xy) - box;
+
+	vec4 viewSpacePos = projectionMatrixInverse * pixelPos;
+	viewSpacePos.xyz /= viewSpacePos.w;
+	viewSpacePos.w = 1.0;
+	vec4 worldSpacePos = (modelviewMatrixInverse * viewSpacePos);
+		
+	vec2 fogOfWarLookUp = (worldSpacePos.xz / worldDimensions / 8.0) + vec2(0.5, 0.5);
+	vec4 fogOfWarSample = texture(fogOfWarAndWaterColors, fogOfWarLookUp);
+	vec4 fogSample = texture(fogMap, fogOfWarLookUp);
+
+	if (fogOfWarSample.a < 0.01)
+	{
+		finalColor = vec4(0,0,0,0);
+		return;
+	}
+
+	float distance = min((-min(max(d2.x,d2.y),0.0) + length(max(d2,0.0))) / 0.25, 1.0);	
+
+	// Water computation
+
+	vec3 eyeVec = worldSpacePos.xyz - viewerPos.xyz;	
+	vec3 eyeVecNorm = normalize(eyeVec);
+
+	float t = (waterHeight - viewerPos.y) / eyeVecNorm.y;
+	vec3 waterSurfacePoint = viewerPos + eyeVecNorm * t;
+
+
+	vec4 offsetTex = texture(waterRippleTex, (waterSurfacePoint.xz * 0.0625) + vec2(timer*0.125,0)) * 2.0 - 1.0; // in tangent space
+	vec4 offsetTex2 = texture(waterRippleTex, (waterSurfacePoint.xz * 0.125) + vec2(0,-timer*0.125)) * 2.0 - 1.0; // in tangent space
+	vec4 offsetTex3 = texture(waterRippleTex, (waterSurfacePoint.xz * 0.0625) + vec2(-timer*0.125,0)) * 2.0 - 1.0; // in tangent space
+	vec4 offsetTex4 = texture(waterRippleTex, (waterSurfacePoint.xz * 0.03125) + vec2(0,timer*0.125)) * 2.0 - 1.0; // in tangent space
+
+	vec3 worldSpaceOffsetTex = mat3(modelViewMatrix) * normalize(offsetTex.xzy + offsetTex2.xzy + offsetTex3.xzy + offsetTex4.xzy);		// NOTE SWIZZLE
+	vec3 eye = (mat3(modelViewMatrix) * vec3(0,0,1)).xyz;
+	vec3 light = (mat3(modelViewMatrix) * normalize(vec3(1,1,1))).xyz;
+	vec3 waterNormal = (mat3(modelViewMatrix) * vec3(0,1,0)).xyz;
+
+	eye = normalize(eye);
+	light = normalize(light);
+	
+	float waterDistance = (waterHeight - worldSpacePos.y); //water height for shader only
+	
+	vec3 displacement = worldSpaceOffsetTex.xzy * 0.01 * clamp(waterDistance, 0.0, 1.0);
+	vec2 texelToSample = texCoord0;
+	if (waterDistance > 0.1)
+	{
+		texelToSample += displacement.xz;
+	}
+	
+
+	float viewDistance = saturate((30.0 - worldSpacePos.y) / 15.0);
+	float fog = saturate(1.0 / pow(2.71828, viewDistance));
+
+	float shoreLineFog = saturate(1.0 / pow(2.71828,waterDistance)	);
+	float waterFog = saturate(1.0 / pow(2.71828, waterDistance/8.0));
+	vec3 fogColor = vec3(0.0, 0.125, 0.0625);	
+		
+	vec4 normalsSample = texture (normalsTex, texelToSample);
+    vec4 aoSample = texture(aoTex,texelToSample);
+	vec4 albedoSample = texture(albedoMapTex, texelToSample);
+	vec3 diffuse = texture(diffuseAccumulationTex, texelToSample).xyz;
+	// Throw the directional light in there too.
+
+	vec4 specInfo = texture(specularInfoTex, texelToSample);
+
+	diffuse += saturate(vec3(saturate(dot(normalsSample.xyz, lightVec)) * normalsSample.w) * lightColor.xyz + lightAmbient.xyz);	
+	vec4 reflectionSample = texture(reflectionTex,texelToSample);
+	vec3 preGammaColor = albedoSample.xyz * diffuse * aoSample.a;
+
+	if (waterDistance > 0.0)
+	{
+		preGammaColor.xyz = (preGammaColor.xyz * (waterFog) + fogColor * (1.0-waterFog));
+	}
+
+	preGammaColor = preGammaColor * fogOfWarSample.a;
+
+	if (waterDistance > 0.0)
+	{
+		float eyedot = dot(eye, worldSpaceOffsetTex);
+		float spec = pow(saturate(dot(worldSpaceOffsetTex,light)),12.0);
+		vec4 waterFogColor = vec4(fogOfWarSample.rgb, 1.0);
+		reflectionSample = waterFogColor * 0.25;
+		preGammaColor.xyz = (preGammaColor.xyz * eyedot + reflectionSample.xyz * (1.0 - eyedot) + spec) * (1.0 - shoreLineFog) + vec3(1,1,1) * (shoreLineFog);		
+	}
+
+	if (gamePaused == true)
+	{
+		preGammaColor.xyz *= distance;
+	}
+
+	preGammaColor.xyz *= 1.35;  // Hardcoded Exposure Adjustment
+
+	vec3 x = max(vec3(0,0,0),preGammaColor.xyz-vec3(0.004));
+	vec3 retColor = (x*(6.2*x+.5))/(x*(6.2*x+1.7)+0.06);
+
+	retColor.xyz += aoSample.xyz;
+
+	if (sobel.w > 0.0)
+	{		
+		retColor.xyz = sobel.xyz;
+	}
+
+	finalColor.xyz = retColor.xyz;
+	
+	finalColor.w = 1.0;
+	
+}

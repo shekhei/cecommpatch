@@ -1,0 +1,109 @@
+[Vertex shader]
+
+#version 130
+
+out vec4 pixelPos;
+out vec3 eyeNormal;
+out vec4 vWorldPosition;
+
+uniform mat4 worldMatrix;
+uniform mat4 normalMatrix;
+
+out vec4 texCoord0;
+out vec4 texCoord1;
+
+uniform int baseTexIndex;
+flat out int baseTexIndexOut;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+uniform mat4 projectionModelViewMatrix;
+
+void main()
+{
+	vWorldPosition = (modelViewMatrix * gl_Vertex);
+	gl_Position = projectionModelViewMatrix * gl_Vertex;
+	pixelPos = gl_Position;
+
+	// Lighting vectors
+	
+	eyeNormal = mat3(modelViewMatrix) * gl_Normal;
+	baseTexIndexOut = baseTexIndex;			// pass thru
+	texCoord0 = gl_MultiTexCoord0;
+	texCoord1 = gl_MultiTexCoord1;
+}
+
+[Fragment shader]
+#version 150
+
+#extension GL_ARB_draw_buffers : enable
+#extension GL_EXT_texture_array: enable
+
+#include shadow_frag.inl
+
+in vec4 texCoord0;
+in vec4 texCoord1;
+in vec3 eyeNormal;
+in vec4 pixelPos;
+in vec4 vWorldPosition;
+
+uniform sampler2DArray baseTex;
+flat in int baseTexIndexOut;
+
+uniform sampler2D specularTex;
+uniform sampler2D glowTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+uniform mat4 normalMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+
+uniform float specularPower;
+uniform float specularIntensity;
+
+uniform vec3 lightVec;
+uniform vec4 lightColor;
+uniform vec4 lightAmbient;
+
+#include deferred.inl
+
+
+void main()
+{	
+
+	vec4 baseTexel = texture(baseTex, vec3(texCoord0.xy, baseTexIndexOut), 0.0);	
+	vec4 glowTexel = texture(glowTex, vec2(texCoord0));
+	// and actually we just pack things in here.	
+
+	if (baseTexel.w < 0.2) { discard; } 
+
+	WriteOutPositionAndNormals();
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);
+	vec3 r = reflect(-lightVec, normalize(eyeNormal));
+
+	float phong = pow(saturate(r.z), specularPower) * glowTexel.a * specularIntensity;
+
+
+	float lambertian = dot(eyeNormal,lightVec);
+	float shadow = saturate(PCFShadowMap(lightCoords)) * step(0.02,lambertian);	
+
+	// baseTexel * 
+	gl_FragData[1] = 
+	
+	baseTexel * 
+	saturate(
+	saturate(dot(eyeNormal, lightVec)) 
+	 * shadow * lightColor
+	  + lightAmbient);
+
+	gl_FragData[1].xyz += vec3(phong,phong,phong)*saturate(shadow+0.5);	
+	gl_FragData[1].w = outlineValue;
+	gl_FragData[2].xyz = vec3(0.0, 0.0, 0.0);	
+	gl_FragData[2].w = 1.0;	
+
+}

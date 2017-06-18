@@ -1,0 +1,44 @@
+[Vertex shader]
+
+#version 150
+
+varying vec4 outPosition;
+
+void main()
+{
+
+	gl_Position = gl_Vertex;
+	outPosition = gl_Position;
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+}
+
+[Fragment shader]
+
+#version 150
+
+uniform sampler2D diffuseTex;
+uniform sampler2D normalsTex;
+uniform sampler2D aoTex;
+uniform sampler2D unlitTex;
+uniform sampler2D glowTex;
+
+uniform float screenWidth;
+uniform float screenHeight;
+
+ float totStrength = 1.38;
+ float strength = 0.07;
+ float offset = 18.0;
+ float falloff = 0.000002;
+ float rad = 0.006;
+
+
+#define SAMPLES 16 // 10 is good
+
+const float invSamples = 1.0/16.0;
+
+void main(void)
+{
+	vec4 normalsSample = texture(normalsTex,gl_TexCoord[0].xy);
+	gl_FragColor = normalsSample;
+	gl_FragColor.w = 1.0;
+}

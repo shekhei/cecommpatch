@@ -1,0 +1,104 @@
+[Vertex shader]
+
+#version 150
+#include layout.inl
+
+
+out vec3 norm;
+out vec4 vAdjustedPosition;
+out vec4 vLocalPosition;
+out vec4 frontColor;
+out vec2 texCoord0;
+
+out vec4 pixelPos;
+out vec4 vWorldPosition;
+out vec3 eyeNormal;
+
+void main()
+{
+	vLocalPosition = vec4(position.xyz, 1);
+	vWorldPosition = (modelViewMatrix * vLocalPosition);
+	vAdjustedPosition = (invCameraMatrix * modelViewMatrix) * vLocalPosition;
+	gl_Position = projectionMatrix * modelViewMatrix * vLocalPosition;
+	frontColor = color;	
+	pixelPos = gl_Position;
+
+	// Lighting vectors
+	
+	norm = normal;
+	eyeNormal = mat3(modelViewMatrix) * normal;
+	
+	texCoord0 = texCoord;	
+}
+
+[Fragment shader]
+#version 150
+
+#extension GL_ARB_draw_buffers : enable
+#extension GL_EXT_texture_array : enable
+
+uniform sampler2D baseTex;
+uniform sampler2D sideTex;
+uniform sampler2D alphaTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+in vec3 norm;
+uniform vec3 lightVec;
+
+in vec2 texCoord0;
+
+in vec4 pixelPos;
+in vec4 vAdjustedPosition;
+in vec4 vLocalPosition;
+in vec4 frontColor;
+
+uniform float specPower;
+uniform float specIntensity;
+
+#include shadow_frag.inl
+#include deferred.inl
+
+
+
+void main()
+{	
+	WriteOutPositionAndNormals();
+
+	// Test for the grid.
+	float gridThresh = min(abs(4.0 - mod(abs(vAdjustedPosition.x + 4.0), 8.0)), abs(4.0 - mod(abs(vAdjustedPosition.z + 4.0), 8.0)));
+	
+	float gridAmt = 0.0;
+	
+	if (gridThresh < 0.20)
+	{
+		gridAmt = 1.0;
+	}
+	else if (gridThresh < 0.35)
+	{
+		gridAmt = 1.0 - (gridThresh - 0.2) / 0.15;
+	}
+	float alpha = gridAmt * norm.y * norm.y;
+
+	if (alpha < 0.2) 
+	{
+		discard;
+	}
+	
+	vec4 blendTexel = texture(baseTex, vec2(texCoord0));	
+	
+	// FIXME: Divide by W?
+
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);	
+	float light = saturate(saturate(PCFShadowMap(lightCoords)+0.25) * saturate(dot(eyeNormal, lightVec)) + 0.25);
+	
+	albedoBuffer = vec4(light, light * (1.0 - blendTexel.r), light * (1.0 - blendTexel.r), gridAmt * frontColor.x * norm.y * norm.y);
+	albedoBuffer = (alpha < 0.2 ? vec4(0.0, 0.0, 0.0, 0.0) : albedoBuffer);
+	glowBuffer = vec4(0.0, 0.0, 0.0, alpha < 0.2 ? 0.0 : 1.0 );
+}

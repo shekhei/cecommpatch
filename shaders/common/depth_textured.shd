@@ -1,0 +1,49 @@
+[Vertex shader]
+#version 150
+#include layout.inl
+
+out vec4 outPos;
+out vec2 texCoord0;
+void main()
+{
+	vec4 temp = vec4(position, 1);
+	gl_Position = projectionMatrix * modelViewMatrix * (temp);
+	outPos = gl_Position;
+	texCoord0 = texCoord;
+}
+
+
+[Fragment shader]
+#version 150
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform vec3 lightPos;
+uniform vec3 camPos;
+uniform sampler2D baseTex;
+
+uniform float ambient;
+uniform sampler2D influenceTex;
+
+in vec4 outPos;
+in vec2 texCoord0;
+
+out vec4 fragColor;
+
+void main()
+{	
+   vec4 baseTexel = texture(baseTex, texCoord0);
+   if (baseTexel.w < 0.2) { discard; } 
+
+   float z = (outPos.z) / outPos.w;
+   float depth = z * 0.5 + 0.5;
+    
+   float dx = dFdx(depth);
+   float dy = dFdy(depth);
+   float bias = 0.25 * (dx*dx+dy*dy);
+   
+   vec4 lightColor = vec4(depth, depth, depth, depth);
+   
+   fragColor = lightColor;
+}

@@ -1,0 +1,46 @@
+[Vertex shader]
+#version 150
+
+// these will be generated once per light
+
+uniform vec3 lightPos;
+uniform vec3 lightDir;
+out vec4 distanceFromLight;
+uniform float lightRadius;
+
+// for instance (these are directional lights)
+
+uniform vec3 lightPos2;
+uniform vec3 lightDir2;
+out vec4 distanceFromLight2;
+out vec4 ProjShadow;
+
+out vec3 norm;
+out vec3 view;
+uniform vec3 scaleFactor;
+uniform mat4 worldMatrix;
+
+
+void main()
+{
+	gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+}
+
+[Fragment shader]
+#version 150
+
+uniform vec3 camPos;
+uniform sampler2D baseTex;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+void main()
+{	
+   vec4 baseTexel = texture(baseTex, vec2(gl_TexCoord[0]));
+   gl_FragData[0] = baseTexel;
+   gl_FragData[0].xyz *= baseTexel.w;
+}

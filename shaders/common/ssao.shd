@@ -1,0 +1,98 @@
+[Vertex shader]
+#version 150
+#extension GL_ARB_explicit_attrib_location : enable
+
+layout ( location = 1 ) in vec3 position;
+layout ( location = 2 ) in vec2 texCoord;
+
+out vec4 outPosition;
+out vec2 texCoord0;
+
+void main()
+{
+
+	gl_Position = vec4(position.xyz,1);
+	outPosition = gl_Position;
+	texCoord0 = texCoord;
+}
+
+[Fragment shader]
+
+#version 150
+
+uniform sampler2D normalsTex;
+uniform sampler2D positionTex;
+uniform sampler2D randomNoise;
+uniform sampler2D oldBuffer;
+
+uniform float screenWidth;
+uniform float screenHeight;
+
+#define RADIUS 0.02
+#define SAMPLE_STRENGTH 0.02
+#define TOTAL_STRENGTH 1.04
+#define FALLOFF 0.000004
+#define SAMPLES 10
+#define INVERSE_SAMPLES 0.1
+
+in vec2 texCoord0;
+out vec4 fragColor;
+
+void main(void)
+{
+	vec3 sample = vec3(0,0,0);
+
+		vec3 pSphere[16] = vec3[](
+		vec3(0.370310, 0.928568, 0.025146),
+		vec3(-0.802877, -0.359211, 0.475769),
+		vec3(-0.358219, -0.025526, 0.933289),
+		vec3(0.316453, -0.333148, -0.888184),
+		vec3(0.285025, 0.625761, -0.726074),
+		vec3(-0.609302, -0.767010, -0.201111),
+		vec3(-0.415153, -0.511441, 0.752380),
+		vec3(-0.149324, 0.387994, -0.909485),
+		vec3(0.494366, -0.333350, -0.802795),
+		vec3(-0.020462, -0.323924, -0.945862),
+		vec3(-0.824246, 0.490603, -0.282715),
+		vec3(0.589120, 0.785801, 0.188293),
+		vec3(-0.170346, 0.822536, -0.542603),
+		vec3(-0.627600, -0.299340, 0.718689),
+		vec3(0.962292, -0.133515, -0.237000),
+		vec3(-0.027347, 0.810027, 0.585754));
+
+
+	vec3 noiseTexel = texture(randomNoise, texCoord0 * 4).xyz * 2.0 - vec3(1.0,1.0,1.0);
+    vec4 currentPixelSample = texture(normalsTex, texCoord0);
+  
+    float currentPixelDepth = currentPixelSample.w; // texture(positionTex,gl_TexCoord[0].xy).z;
+   
+	// current fragment coords in screen space
+
+    vec3 screenSpaceFragCoords = vec3(texCoord0,currentPixelDepth);
+
+	// get the normal of current fragment
+
+    vec3 norm = currentPixelSample.xyz;
+ 
+    float totalOcclusion = 0.0;
+    float radiusFraction = RADIUS/currentPixelDepth;
+ 
+    vec3 ray, samplePos, occlusionNorm;
+    float occluderDepth, depthDifference, normalCosine;
+ 
+    for(int i=0; i < SAMPLES; ++i)
+    {      
+      ray = reflect(pSphere[i],noiseTexel) * radiusFraction;
+      samplePos = screenSpaceFragCoords + sign(dot(ray,norm) )*ray + sample;
+      vec4 occluderFragment = texture(normalsTex,samplePos.xy);
+      occlusionNorm = occluderFragment.xyz; 
+      depthDifference = currentPixelDepth-occluderFragment.a;
+	  totalOcclusion += step(FALLOFF,depthDifference)*(1.0-dot(occlusionNorm,norm))*(1.0-smoothstep(FALLOFF,SAMPLE_STRENGTH,depthDifference));	  
+   }
+   
+   // output the result
+
+   float ao = 1.0 - (TOTAL_STRENGTH * totalOcclusion * INVERSE_SAMPLES);      
+   fragColor = texture(oldBuffer, texCoord0);   
+   fragColor.a = ao;
+}

@@ -1,0 +1,109 @@
+[Vertex shader]
+#version 150
+
+#include layout.inl
+
+out vec2 texCoord0;
+out vec3 eyeNormal;
+out vec4 vWorldPosition;
+out vec4 pixelPos;
+
+uniform mat4 bones[48];
+
+
+void main()
+{
+	vec4 old_vertex = vec4(position.xyz,1);
+	vec4 newVertex;
+    vec4 newNormal;
+   
+    int index =  int(blendIndices.x);
+    newVertex = (bones[index] * old_vertex) *  blendWeights.x;
+    newNormal = (bones[index] * vec4(normal, 0.0)) *  blendWeights.x;
+      
+    index= int(blendIndices.y);       
+    newVertex = (bones[index] * old_vertex) * blendWeights.y + newVertex;
+    newNormal = (bones[index] * vec4(normal, 0.0)) * blendWeights.y  + newNormal;
+
+    index= int(blendIndices.z);       
+    newVertex = (bones[index] * old_vertex) *  blendWeights.z  + newVertex;
+    newNormal = (bones[index] * vec4(normal, 0.0)) *  blendWeights.z  + newNormal;
+
+    index= int(blendIndices.w);       
+    newVertex = (bones[index] * old_vertex) *  blendWeights.w   + newVertex;
+    newNormal = (bones[index] * vec4(normal, 0.0)) *  blendWeights.w  + newNormal;
+	
+	vWorldPosition = (modelViewMatrix * newVertex);
+	gl_Position = projectionMatrix * modelViewMatrix * newVertex;
+	pixelPos = gl_Position;
+
+	// Lighting vectors
+	
+	eyeNormal = mat3(modelViewMatrix) * newNormal.xyz;
+
+	
+	texCoord0 = texCoord;
+}
+
+[Fragment shader]
+#version 150
+
+#extension GL_ARB_draw_buffers : enable
+
+#include shadow_frag.inl
+
+uniform sampler2D baseTex;
+uniform sampler2D specularTex;
+uniform sampler2D glowTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+uniform mat4 normalMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+in vec4 pixelPos;
+in vec2 texCoord0;
+
+uniform float specularPower;
+uniform float specularIntensity;
+
+uniform vec3 lightVec;
+uniform vec4 lightColor;
+uniform vec4 lightAmbient;
+
+out vec4 fragData;
+
+in vec4 vWorldPosition;
+in vec3 eyeNormal;
+
+void main()
+{	
+	vec4 baseTexel = texture(baseTex, texCoord0);
+	vec4 glowTexel = texture(glowTex, texCoord0);
+	// and actually we just pack things in here.	
+
+	if (baseTexel.w < 0.2) { discard; } 
+
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);
+	vec3 r = reflect(-lightVec, normalize(eyeNormal));
+
+	float phong = pow(saturate(r.z), specularPower) * glowTexel.a * specularIntensity;
+
+
+	float lambertian = dot(eyeNormal,lightVec);
+	float shadow = saturate(PCFShadowMap(lightCoords)) * step(0.02,lambertian);
+	
+
+	// baseTexel * 
+	fragData = baseTexel * saturate(dot(eyeNormal, lightVec) + 0.5);
+
+	fragData.xyz += vec3(phong,phong,phong);
+	fragData.xyz += glowTexel.xyz;	
+	fragData.xyz = pow(fragData.xyz, vec3(1.0 / 2.2));
+	fragData.w = 1.0;
+
+}

@@ -1,0 +1,60 @@
+[Vertex shader]
+#version 150
+#include layout.inl
+
+out vec2 texCoord0;
+out vec3 eyeNormal;
+out vec4 vWorldPosition;
+out vec4 pixelPos;
+out vec4 vertexColor;
+
+
+
+void main()
+{
+	
+	gl_Position = projectionMatrix * modelViewMatrix * vec4(position.xyz, 1);
+	vertexColor = color;
+	pixelPos = gl_Position;
+
+	// Lighting vectors
+	
+	eyeNormal = mat3(modelViewMatrix) * normal;
+	texCoord0 = texCoord;
+}
+
+[Fragment shader]
+#version 150
+#include deferred.inl
+
+uniform sampler2D depthTex;
+uniform sampler2D baseTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+uniform mat4 normalMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+uniform float specularPower;
+uniform float specularIntensity;
+uniform float screenWidth;
+uniform float screenHeight;
+
+uniform vec3 lightVec;
+in vec4 vertexColor;
+in vec2 texCoord0;
+
+out vec4 fragColor;
+void main()
+{	
+	vec2 depthPos = vec2(gl_FragCoord.x / screenWidth, gl_FragCoord.y / screenHeight);
+	vec4 depth = texture (depthTex, depthPos);
+	fragColor = texture(baseTex, texCoord0) * vertexColor;
+//	fragColor.a = fragColor.a * (gl_FragCoord.z < depth.r ? 1.0 : 0.0);
+}
+
+ 

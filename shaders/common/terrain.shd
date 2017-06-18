@@ -1,0 +1,63 @@
+[Vertex shader]
+
+out vec4 pixelPos;
+out vec3 norm;
+out vec4 vWorldPosition;
+
+uniform mat4 worldMatrix;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+
+
+void main()
+{
+	vWorldPosition = (modelViewMatrix * gl_Vertex);
+	gl_Position = projectionMatrix * modelViewMatrix * gl_Vertex;
+	pixelPos = gl_Position;
+
+	// Lighting vectors
+	
+	norm = gl_Normal * 0.5 + 0.5;
+	
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+	gl_TexCoord[1] = gl_MultiTexCoord1;
+}
+
+[Fragment shader]
+
+#extension GL_ARB_draw_buffers : enable
+
+uniform sampler2D baseTex;
+uniform sampler2D alphaTex;
+uniform sampler2D shadowTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+in vec3 norm;
+in vec4 pixelPos;
+in vec4 vWorldPosition;
+
+uniform float specPower;
+uniform float specIntensity;
+
+void main()
+{
+
+	vec3 light = vec3(1,1,1);
+	vec3 normalizedLight = normalize(light);
+	vec3 normalizedNorm = normalize(norm);
+	
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);
+
+	vec4 baseTexel = texture(baseTex, vec2(gl_TexCoord[0]));
+	vec4 blendTexel = texture(alphaTex, vec2(gl_TexCoord[1]));
+	gl_FragData[0] = saturate(dot(normalizedLight, normalizedNorm)) * vec4(baseTexel.x, baseTexel.y, baseTexel.z, blendTexel.x); 
+	
+}

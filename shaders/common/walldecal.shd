@@ -1,0 +1,129 @@
+[Vertex shader]
+#version 150
+#extension GL_ARB_explicit_attrib_location : require
+
+layout ( location = 1 ) in vec3 position;
+layout ( location = 2 ) in vec2 texCoord;
+layout ( location = 3 ) in vec3 normal;
+
+out vec2 texCoord0;
+
+out vec4 pixelPos;
+out vec3 eyeNormal;
+out vec4 vWorldPosition;
+
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+
+uniform mat4 worldMatrix;
+uniform mat4 normalMatrix;
+
+
+void main()
+{
+	vWorldPosition = (modelViewMatrix * vec4(position.xyz, 1.0));
+	gl_Position = (projectionMatrix * modelViewMatrix) * vec4(position.xyz, 1.0);
+	pixelPos = gl_Position;
+
+	// Lighting vectors
+	
+	eyeNormal = mat3(modelViewMatrix) * vec3(0,1,0);
+	
+	texCoord0 = texCoord;
+	
+}
+
+[Fragment shader]
+
+#version 150
+#extension GL_ARB_draw_buffers : enable
+
+uniform float outlineValue;
+uniform float farClipPlane;
+in vec3 eyeNormal;
+uniform float screenWidth;
+uniform float screenHeight;
+in vec4 vWorldPosition;
+
+#extension GL_ARB_explicit_attrib_location: require
+
+layout (location = 0) out vec4 albedoBuffer;
+layout (location = 2) out vec4 glowBuffer;
+
+#include shadow_frag.inl
+
+uniform sampler2D baseTex;
+uniform sampler2D alphaTex;
+uniform sampler2D specularTex;
+uniform sampler2D glowTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+uniform mat4 normalMatrix;
+uniform mat4 projectionMatrixInverse;
+uniform vec4 fixedColor;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+uniform float specularPower;
+uniform float specularIntensity;
+
+uniform vec3 lightVec;
+
+uniform vec3 centroidVector;
+uniform vec3 extentVector;
+uniform vec4 uniformColor;
+in vec2 texCoord0;
+
+
+
+float overlayBlend ( float base, float value, float opacity )
+{
+	float a = (base < 0.5 ? 2 * base * value : 1 - (2 * (1-base)*(1-value)));
+	return mix(base,a,opacity);
+}
+
+void main()
+{	
+	vec4 pixelPosSample = texture(alphaTex,vec2(gl_FragCoord.x / screenWidth, gl_FragCoord.y / screenHeight));
+	if (gl_FragCoord.z > pixelPosSample.r)
+	{
+		discard;
+	}
+
+	float depth = 1.0 - pixelPosSample.r;
+	pixelPosSample.b = pixelPosSample.r;
+	pixelPosSample.r = gl_FragCoord.x / screenWidth;
+	pixelPosSample.g = gl_FragCoord.y / screenHeight;
+	vec4 pixelPos = pixelPosSample;	
+
+	pixelPos *= 2.0;
+	pixelPos -= 1.0;
+	pixelPos.w = 1.0;
+
+	vec4 viewSpacePos = projectionMatrixInverse * pixelPos;
+	viewSpacePos.xyz /= viewSpacePos.w;
+	viewSpacePos.w = 1.0;
+
+	vec4 worldSpacePos = (invCameraMatrix * viewSpacePos);
+	
+   //vec2 d = (viewSpacePos).xz - centroidVector.xz;
+    vec2 d = (worldSpacePos).xz - centroidVector.xz;
+   float dist = abs(dot(d, vec2(1.0,0.0))) - extentVector.x;
+   float du = abs(dist) + dist;
+   dist = abs(dot(d,vec2(0.0,1.0))) - extentVector.z;
+   float dv = abs(dist) + dist;
+   float fade = 1.0 - saturate(sqrt(du*du+dv*dv) / 8.0);
+
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);	
+	float light = saturate(saturate(PCFShadowMap(lightCoords)+0.25) * saturate(dot(eyeNormal, lightVec)) + 0.25);
+	float outline = 1.0 - saturate(abs((sqrt(du*du+dv*dv) / 8.0) - 0.5) * 2.0);
+	
+	//albedoBuffer.rgb = vec3(0,0.75,0.5);
+	albedoBuffer = uniformColor;
+	
+
+}

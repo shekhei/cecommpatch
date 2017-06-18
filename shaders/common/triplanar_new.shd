@@ -1,0 +1,125 @@
+[Vertex shader]
+
+#include triplanar_vs.inl
+
+[Fragment shader]
+#version 150
+
+#extension GL_ARB_draw_buffers : enable
+#extension GL_EXT_texture_array : enable
+
+uniform sampler2DArray baseTex;
+uniform sampler2D sideTex;
+uniform sampler2D alphaTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+in vec3 norm;
+uniform vec3 lightVec;
+
+in vec4 pixelPos;
+in vec4 vAdjustedPosition;
+in vec4 vLocalPosition;
+
+uniform float specPower;
+uniform float specIntensity;
+
+uniform vec4 lightColor;
+uniform vec4 lightAmbient;
+
+#include shadow_frag_terrain.inl
+#include deferred.inl
+
+vec4 piecewiseBlend(vec4 upperTex, vec4 lowerTex, float amount)
+{
+	const float blendRange = 0.1;
+	vec4 baseTexel;
+	
+	amount *= 1.0 + blendRange;
+	
+	if (upperTex.a < amount - blendRange) 
+	{
+		baseTexel = upperTex;
+	} 
+	else if (upperTex.a > amount + blendRange) 
+	{
+		baseTexel = lowerTex;
+	} 
+	else 
+	{
+		float f = (upperTex.a - (amount - blendRange)) / (2.0 * blendRange);
+		baseTexel = lerp(upperTex, lowerTex, f);	
+	}	
+	
+	return baseTexel;
+}
+
+void main()
+{	
+	WriteOutPositionAndNormals();
+	vec3 normal = normalize(norm);
+   
+	float tighten = 0.4679; 
+	
+	vec3 blendweights = abs(normal) - tighten;
+	blendweights = max(blendweights, 0);
+   
+	float mXY = blendweights.z;
+	float mXZ = blendweights.y; 
+	float mYZ = blendweights.x; 
+   
+	float total = 1.0 / (mXY + mXZ + mYZ);
+	mXZ *= total;
+	
+	float sideTotal = 1.0 / max((mXY + mYZ), 0.0001);
+	mXY *= sideTotal;
+	mYZ *= sideTotal;
+   
+   // need scale to be such that 8 units over is one texture
+
+	float scale = 0.038;
+	
+	float rVal = sqrt(2.0)/2.0;
+	vec2 rotatedCoords = vec2(rVal * (vAdjustedPosition.x  - vAdjustedPosition.z), rVal * (vAdjustedPosition.x + vAdjustedPosition.z));
+	
+	vec4 cXZ = texture(baseTex, vec3(vAdjustedPosition.x * scale, vAdjustedPosition.z * scale, 0.0));   
+	vec4 cXY = texture(baseTex, vec3(vAdjustedPosition.x * scale * 0.66667, vAdjustedPosition.y * scale * 0.66667, 1.0));
+	vec4 cYZ = texture(baseTex, vec3(vAdjustedPosition.z * scale * 0.66667, vAdjustedPosition.y * scale * 0.66667, 1.0));
+
+	vec4 cXZ1 = texture(baseTex, vec3(vAdjustedPosition.x * scale, vAdjustedPosition.z * scale, 2.0));   
+	vec4 cXY1 = texture(baseTex, vec3(vAdjustedPosition.x * scale * 0.66667, vAdjustedPosition.y * scale * 0.66667, 3.0));
+	vec4 cYZ1 = texture(baseTex, vec3(vAdjustedPosition.z * scale * 0.66667, vAdjustedPosition.y * scale * 0.66667, 3.0));
+
+	vec4 blendTexel = texture(alphaTex, vec2(gl_TexCoord[1]));	
+	
+	cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel.g);
+	cXY = piecewiseBlend(cXY1, cXY, blendTexel.g);
+	cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel.g);
+
+	cXZ1 = texture(baseTex, vec3(vAdjustedPosition.x * scale, vAdjustedPosition.z * scale, 4.0));
+	cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel.b);
+
+	//vec4 baseTexel = cXY * mXY + cXZ * mXZ + cYZ * mYZ;
+	vec4 baseTexel = piecewiseBlend(cXZ, cXY * mXY + cYZ * mYZ, mXZ);
+	
+	// smoothen the result a bit, to avoid aliasing at shadow contact point
+	// FIXME: Divide by W?
+
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);	
+	float shadow = PCFShadowMap(lightCoords);
+	normalBuffer.w = shadow;
+	
+	albedoBuffer = getGrid(baseTexel, vAdjustPosition.xyz, norm);
+	albedoBuffer.w = 0.0;
+
+	glowBuffer = vec4(0.0, 0.0, 0.0, 1.0);
+	specInteriorBuffer = vec4(0.0, 0.0, 0.0, 1.0);
+	// I don't remember what goes into the other things.		
+
+}

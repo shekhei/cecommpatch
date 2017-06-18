@@ -1,0 +1,120 @@
+[Vertex shader]
+
+#version 150
+
+// these will be generated once per light
+
+uniform vec3 lightPos;
+uniform vec3 lightDir;
+varying vec4 distanceFromLight;
+uniform float lightRadius;
+
+// for instance (these are directional lights)
+
+uniform vec3 lightPos2;
+uniform vec3 lightDir2;
+varying vec4 distanceFromLight2;
+varying vec4 ProjShadow;
+
+varying vec3 norm;
+varying vec3 view;
+uniform vec3 scaleFactor;
+uniform mat4 worldMatrix;
+varying vec4 pixelPos;
+
+void main()
+{
+	gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+	pixelPos = gl_Position;
+	gl_TexCoord[0] = gl_Vertex;
+}
+
+[Fragment shader]
+
+#version 150
+
+uniform vec3 camPos;
+uniform sampler2D baseTex;
+uniform sampler2D sideTex;
+uniform sampler2D alphaTex;
+varying vec4 pixelPos;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+uniform float timer;
+
+void main()
+{
+    vec3 foo = pixelPos.xyz;
+	foo /= pixelPos.w;
+	foo *= 0.5;
+	foo += 0.5;	
+	vec4 normalsDepth = texture(sideTex, foo.xy);	
+
+
+// filler for now
+
+
+	vec4 pos;
+	pos.x = pixelPos.x;
+	pos.y = pixelPos.y;
+	pos.z = (normalsDepth.w * 2.0 - 1.0);
+	pos.w = 1.0;
+	vec4 viewSpacePos = gl_ProjectionMatrixInverse * pos;
+	viewSpacePos.xyz /= viewSpacePos.w;
+	viewSpacePos.w = 1.0;
+	vec4 worldSpacePos = gl_ModelViewMatrixInverse * viewSpacePos;
+
+	// Now, reconstruct *my* position.
+
+	pos.z = (pixelPos.z / pixelPos.w);
+
+	viewSpacePos = gl_ProjectionMatrixInverse * pos;
+	viewSpacePos.xyz /= viewSpacePos.w;
+	viewSpacePos.w = 1.0;
+	vec4 myWorldSpacePos = gl_ModelViewMatrixInverse * viewSpacePos;
+
+	// if < 0, then throw it out
+
+	if (myWorldSpacePos.y < worldSpacePos.y)
+	{
+		discard;
+	}
+
+// convert bump texel from tangent space into world space:
+//
+// tx bx nx   bumpx
+// ty by ny   bumpy
+// tz bz nz   bumpz
+
+   // do lighting
+  
+   // lightPos is in camera space
+   // camPos is in object space
+   
+	vec3 bumpTexel = texture(alphaTex, foo.xy * 32.0).xyz * 2.0 - 1.0;
+    vec3 norm = vec3(0,1,0);
+    vec3 tangent = vec3(1,0,0);
+    vec3 bitangent = vec3(0,0,1);
+	vec3 trueNorm;
+	trueNorm.x = dot(bumpTexel, vec3(tangent.x,bitangent.x,norm.x));
+	trueNorm.y = dot(bumpTexel, vec3(tangent.y,bitangent.y,norm.y));
+	trueNorm.z = dot(bumpTexel, vec3(tangent.z,bitangent.z,norm.z));
+
+	vec3 light = vec3(0.0,1.0,0.0);	
+	float bump = saturate(dot(light,trueNorm));
+
+	vec4 offsetTex = texture(alphaTex, foo.xy * 64.0 + vec2(timer,timer));
+	offsetTex *= 2.0;
+	offsetTex -= 1.0;
+	float viewDistance = saturate((myWorldSpacePos.y - worldSpacePos.y) / 2.0);
+	float fog = saturate(1.0 / pow(2.71828, viewDistance)); 
+	vec4 tex = texture(baseTex, foo.xy + offsetTex.xy * 0.05 * (1.0 - fog));
+	vec3 fogColor = vec3(0.0,0.7,0.8);
+	
+	gl_FragData[0].xyz = fog * (1.0 - fog) + tex.xyz * (fog);
+	gl_FragData[0].w = 1.0;
+
+}

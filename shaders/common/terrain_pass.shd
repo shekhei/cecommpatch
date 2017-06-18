@@ -1,0 +1,35 @@
+[Vertex shader]
+
+void main()
+{
+	gl_Position = gl_ModelViewProjectionMatrix * (gl_Vertex);
+
+	// Lighting vectors
+		
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+	gl_TexCoord[1] = gl_MultiTexCoord1;
+	
+}
+
+[Fragment shader]
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform sampler2D baseTex;
+uniform sampler2D influenceTex;
+uniform vec2 textureScroll;
+
+vec4 getAlbedo()
+{
+   vec4 landscape = texture(baseTex, vec2(gl_TexCoord[0])+textureScroll);
+   landscape[3] = 1;
+   float influence = texture(influenceTex, vec2(gl_TexCoord[1]))[3];
+   
+   return landscape*influence;
+}
+
+void main()
+{
+	gl_FragColor = getAlbedo(); 
+}

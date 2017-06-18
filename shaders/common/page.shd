@@ -1,0 +1,44 @@
+[Vertex shader]
+#version 150
+#pragma STDGL invariant(all)
+
+flat out vec4 face;
+flat out float fR;
+out vec3 barycentric;
+
+void main()
+{
+	gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+	barycentric = gl_MultiTexCoord1.xyz;
+
+	// Lighting vectors
+		
+	face = gl_Color;
+	fR = 8.0;	
+}
+
+[Fragment shader]
+#version 150
+#pragma STDGL invariant(all)
+
+#define saturate(x) clamp(x,0.0,1.0)
+
+flat in vec4 face;
+flat in float fR;
+in vec3 barycentric;
+
+#extension GL_ARB_draw_buffers : enable
+
+void main()
+{
+	gl_FragData[0] = face;
+
+	vec3 dx = dFdx(barycentric * 32.0);
+	vec3 dy = dFdy(barycentric * 32.0);
+	float d = max(dot(dx, dx), dot(dy, dy));
+	float mip_bias = 0.0;
+	float mip = 1.0 - saturate(0.5 * log2(d) - 1);
+	float mipLevel = ceil(fR * (1.0 - mip)) / fR;		
+	
+	gl_FragData[0].x = mipLevel;
+}

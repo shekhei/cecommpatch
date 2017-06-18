@@ -1,0 +1,94 @@
+[Vertex shader]
+
+varying vec4 pixelPos;
+varying vec3 eyeNormal;
+varying vec4 vWorldPosition;
+
+uniform mat4 worldMatrix;
+uniform mat4 normalMatrix;
+uniform float timer;
+
+
+void main()
+{
+	vec4 vertex = gl_Vertex;
+	vertex.x += sin(timer)*0.05 * pow(max(vertex.y,0.0) / 16.0, 2.0);
+	vertex.z += cos(timer*0.8)*0.04 * pow(max(vertex.y,0.0) / 16.0, 2.0);
+	vWorldPosition = (gl_ModelViewMatrix * vertex);
+	gl_Position = gl_ModelViewProjectionMatrix * vertex;
+	pixelPos = gl_Position;
+
+	// Lighting vectors
+	
+	eyeNormal = gl_NormalMatrix * gl_Normal;
+	
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+	gl_TexCoord[1] = gl_MultiTexCoord1;
+}
+
+[Fragment shader]
+
+#extension GL_ARB_draw_buffers : enable
+
+#include shadow_frag.inl
+
+uniform sampler2D baseTex;
+uniform sampler2D specularTex;
+uniform sampler2D glowTex;
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+uniform mat4 normalMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+varying vec3 eyeNormal;
+varying vec4 pixelPos;
+varying vec4 vWorldPosition;
+
+uniform float specularPower;
+uniform float specularIntensity;
+
+uniform vec3 lightVec;
+uniform vec4 lightColor;
+uniform vec4 lightAmbient;
+
+#include deferred.inl
+
+void main()
+{	
+	vec4 baseTexel = texture(baseTex, vec2(gl_TexCoord[0]));
+	vec4 glowTexel = texture(glowTex, vec2(gl_TexCoord[0]));
+	// and actually we just pack things in here.	
+
+	if (baseTexel.w < 0.2) { discard; } 
+
+	WriteOutPositionAndNormals();
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);
+	vec3 r = reflect(-lightVec, normalize(eyeNormal));
+
+	float phong = pow(saturate(r.z), specularPower) * glowTexel.a * specularIntensity;
+
+
+	float lambertian = dot(eyeNormal,lightVec);
+	float shadow = saturate(PCFShadowMap(lightCoords)) * step(0.02,lambertian);
+	
+
+	// baseTexel * 
+	gl_FragData[1] = 
+	
+	baseTexel * 
+	saturate(
+	saturate(dot(eyeNormal, lightVec)) 
+	 * shadow * lightColor
+	  + lightAmbient);
+
+	gl_FragData[1].xyz += vec3(phong,phong,phong)*saturate(shadow+0.5);	
+	gl_FragData[1].w = outlineValue;
+	gl_FragData[2].xyz = vec3(0.0, 0.0, 0.0);	
+	gl_FragData[2].w = 1.0;	
+
+}

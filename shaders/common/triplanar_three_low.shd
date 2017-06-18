@@ -1,0 +1,254 @@
+[Vertex shader]
+
+varying vec4 pixelPos;
+varying vec3 norm;
+varying vec3 eyeNormal;
+varying vec4 vWorldPosition;
+varying vec4 vAdjustPosition;
+varying vec4 vLocalPosition;
+
+varying vec2 texCoord0;
+varying vec2 texCoord1;
+
+uniform mat4 worldMatrix;
+uniform mat4 invCameraMatrix;
+
+void main()
+{
+	vLocalPosition = gl_Vertex;
+	vWorldPosition = (gl_ModelViewMatrix * gl_Vertex);
+	vAdjustPosition = (invCameraMatrix * gl_ModelViewMatrix) * gl_Vertex;
+	gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;
+	pixelPos = gl_Position;
+
+	// Lighting vectors
+	
+	norm = gl_Normal;
+	eyeNormal = gl_NormalMatrix * gl_Normal;
+	
+		
+	texCoord0 = gl_MultiTexCoord0.xy;
+	texCoord1 = gl_MultiTexCoord1.xy;
+
+}
+
+[Fragment shader]
+#version 150
+
+uniform sampler2DArray baseTex;
+uniform sampler2DArray sideTex;
+uniform sampler2DArray otherTex;
+uniform sampler2D alphaTex;
+uniform sampler2D specularTex;
+uniform sampler2D glowTex;
+
+uniform mat4 lightMatrix;
+uniform mat4 invCameraMatrix;
+uniform mat4 worldMatrix;
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform float ambient;
+
+varying vec3 norm;
+varying vec3 eyeNormal;
+uniform vec3 lightVec;
+
+varying vec4 pixelPos;
+varying vec4 vWorldPosition;
+varying vec4 vAdjustPosition;
+varying vec4 vLocalPosition;
+
+uniform vec4 lightColor;
+uniform vec4 lightAmbient;
+
+uniform float specPower;
+uniform float specIntensity;
+
+#include shadow_frag_terrain.inl
+#include deferred.inl
+#include piecewiseblend_med.inl
+
+varying vec2 texCoord0;
+varying vec2 texCoord1;
+
+
+void main()
+{	
+	WriteOutPositionAndNormals();
+	vec3 normal = normalize(norm);
+	float scale = 0.019;
+   
+	vec4 vAdjustedPosition = vAdjustPosition * scale;
+	vec4 vAdjustedPosition23 = vAdjustedPosition * 0.66667;
+	vec4 vAdjustedPosition14 = vAdjustedPosition * 0.25;
+
+	float tighten = 0.4679; 
+	
+	vec3 blendweights = abs(normal) - tighten;
+	blendweights = max(blendweights, 0);
+   
+	float mXY = blendweights.z;
+	float mXZ = blendweights.y; 
+	float mYZ = blendweights.x; 
+   
+	float total = 1.0 / (mXY + mXZ + mYZ);
+	mXZ *= total;
+	
+	float sideTotal = 1.0 / max((mXY + mYZ), 0.0001);
+	mXY *= sideTotal;
+	mYZ *= sideTotal;
+   
+   // need scale to be such that 8 units over is one texture
+	
+	vec4 cXZ = 0.5 * texture(baseTex, vec3(vAdjustedPosition.x, vAdjustedPosition.z , 0.0)) + 0.5 * texture(baseTex, vec3(vAdjustedPosition14.x , vAdjustedPosition14.z  , 0.0));
+	vec4 cXY = texture(baseTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 1.0));
+	vec4 cYZ = texture(baseTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 1.0));
+	
+	vec4 blendTexel = texture(alphaTex, vec2(texCoord1));	
+	vec4 blendTexel2 = texture(specularTex, vec2(texCoord1));	
+	vec4 blendTexel3 = texture(glowTex, vec2(texCoord1));	
+
+	if (blendTexel.g > 0)
+	{
+		vec4 cXZ1 = 0.5 * texture(baseTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 2.0)) + 0.5 * texture(baseTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 2.0));   
+		vec4 cXY1 = texture(baseTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 3.0));
+		vec4 cYZ1 = texture(baseTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 3.0));	
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel.g);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel.g);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel.g);
+	}
+
+	if (blendTexel.b > 0)
+	{
+		vec4 cXZ1 = 0.5 * texture(baseTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 4.0)) + 0.5 * texture(baseTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 4.0));
+		vec4 cXY1 = texture(baseTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 5.0));
+		vec4 cYZ1 = texture(baseTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 5.0));
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel.b);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel.b);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel.b);
+	}
+
+	if (blendTexel.a > 0)
+	{	
+		vec4 cXZ1 = 0.5 * texture(baseTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 4.0)) + 0.5 * texture(baseTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 6.0));
+		vec4 cXY1 = texture(baseTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 7.0));
+		vec4 cYZ1 = texture(baseTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 7.0));
+
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel.a);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel.a);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel.a);
+	}	
+	
+	if (blendTexel2.r > 0)
+	{
+		vec4 cXZ1 = 0.5 * texture(sideTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 0.0)) 
+		+ 0.5 * texture(sideTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 0.0));   
+		vec4 cXY1 = texture(sideTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 1.0));
+		vec4 cYZ1 = texture(sideTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 1.0));	
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel2.r);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel2.r);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel2.r);
+	}
+
+
+	if (blendTexel2.g > 0)
+	{
+		vec4 cXZ1 = 0.5 * texture(sideTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 2.0)) 
+		+ 0.5 * texture(sideTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 2.0));   
+		vec4 cXY1 = texture(sideTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 3.0));
+		vec4 cYZ1 = texture(sideTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 3.0));	
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel2.g);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel2.g);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel2.g);
+	}
+
+	if (blendTexel2.b > 0)
+	{
+		vec4 cXZ1 = 0.5 * texture(sideTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 4.0)) 
+		+ 0.5 * texture(sideTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 4.0));
+		vec4 cXY1 = texture(sideTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 5.0));
+		vec4 cYZ1 = texture(sideTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 5.0));
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel2.b);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel2.b);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel2.b);
+	}
+
+	if (blendTexel2.a > 0)
+	{	
+		vec4 cXZ1 = 0.5 * texture(sideTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 4.0)) 
+		+ 0.5 * texture(sideTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 6.0));
+		vec4 cXY1 = texture(sideTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 7.0));
+		vec4 cYZ1 = texture(sideTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 7.0));
+
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel2.a);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel2.a);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel2.a);
+	}		
+
+	if (blendTexel3.r > 0)
+	{
+		vec4 cXZ1 = 0.5 * texture(otherTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 0.0)) 
+		+ 0.5 * texture(otherTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 0.0));   
+		vec4 cXY1 = texture(otherTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 1.0));
+		vec4 cYZ1 = texture(otherTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 1.0));	
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel3.r);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel3.r);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel3.r);
+	}
+
+
+	if (blendTexel3.g > 0)
+	{
+		vec4 cXZ1 = 0.5 * texture(otherTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 2.0)) 
+		+ 0.5 * texture(otherTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 2.0));   
+		vec4 cXY1 = texture(otherTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 3.0));
+		vec4 cYZ1 = texture(otherTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 3.0));	
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel3.g);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel3.g);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel3.g);
+	}
+
+	if (blendTexel3.b > 0)
+	{
+		vec4 cXZ1 = 0.5 * texture(otherTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 4.0)) 
+		+ 0.5 * texture(otherTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 4.0));
+		vec4 cXY1 = texture(otherTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 5.0));
+		vec4 cYZ1 = texture(otherTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 5.0));
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel3.b);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel3.b);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel3.b);
+	}
+
+	if (blendTexel3.a > 0)
+	{	
+		vec4 cXZ1 = 0.5 * texture(otherTex, vec3(vAdjustedPosition.x , vAdjustedPosition.z , 4.0)) 
+		+ 0.5 * texture(otherTex, vec3(vAdjustedPosition14.x  , vAdjustedPosition14.z  , 6.0));
+		vec4 cXY1 = texture(otherTex, vec3(vAdjustedPosition23.x, vAdjustedPosition23.y, 7.0));
+		vec4 cYZ1 = texture(otherTex, vec3(vAdjustedPosition23.z, vAdjustedPosition23.y, 7.0));
+
+		cXZ = piecewiseBlend(cXZ1, cXZ, blendTexel3.a);
+		cXY = piecewiseBlend(cXY1, cXY, blendTexel3.a);
+		cYZ = piecewiseBlend(cYZ1, cYZ, blendTexel3.a);
+	}		
+
+
+	vec4 baseTexel = piecewiseBlend(cXZ, cXY * mXY + cYZ * mYZ, mXZ);
+	
+	// smoothen the result a bit, to avoid aliasing at shadow contact point
+	// FIXME: Divide by W?
+
+	vec4 lightCoords = lightMatrix * (invCameraMatrix * vWorldPosition);	
+	
+	vec4 light = saturate(saturate(PCFShadowMap(lightCoords)+0.25) * saturate(dot(eyeNormal, lightVec)) * lightColor + lightAmbient);
+	
+	gl_FragData[1] = baseTexel * light;
+	gl_FragData[1].w = min(blendTexel.r + blendTexel.g + blendTexel.b + blendTexel.a + blendTexel2.r + blendTexel2.g + blendTexel2.b + blendTexel2.a
+	+ blendTexel3.r + blendTexel3.g + blendTexel3.b + blendTexel3.a, 1.0);	
+	
+
+	gl_FragData[2].xyzw = vec4(0.0, 0.0, 0.0, 1.0);
+	// I don't remember what goes into the other things.		
+
+}

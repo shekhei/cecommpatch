@@ -1,0 +1,118 @@
+[Vertex shader]
+#version 150
+
+out vec2 outPos;
+
+void main()
+{
+	gl_Position = gl_Vertex;
+	outPos = gl_Position.xy;
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+}
+
+[Fragment shader]
+#version 150
+
+#extension GL_ARB_draw_buffers : enable
+
+
+#define saturate(x) clamp(x,0.0,1.0)
+
+
+uniform sampler2D diffuseTex;
+uniform sampler2D normalsDepthTex;
+uniform sampler2D depthTex;
+uniform sampler2D spotTex;
+
+uniform vec3 lightPosition;
+uniform vec3 lightDir;
+uniform float lightAngleCosine;
+uniform float lightDecayExponent;
+
+uniform vec3 cameraPlanes;
+uniform vec3 lightColor;
+uniform float lightRadius;
+
+in vec2 outPos;
+
+uniform mat4 lightViewMatrix;
+uniform mat4 lightViewProjMatrix;
+
+float DepthToZ ( float depth )
+{
+	return cameraPlanes.x / (cameraPlanes.y - (depth * cameraPlanes.z)) * cameraPlanes.y;
+}
+
+void main()
+{	
+	vec4 diffuse = texture(diffuseTex, vec2(gl_TexCoord[0]));		
+	vec4 normalsDepth = texture(normalsDepthTex, vec2(gl_TexCoord[0]));
+	
+	// unpack normals
+	
+	vec3 normals = normalize(normalsDepth.xyz * 2.0 - 1.0);
+	
+	vec4 pos;
+	pos.x = outPos.x;
+	pos.y = outPos.y;
+	pos.z = (normalsDepth.w * 2.0 - 1.0);
+	pos.w = 1.0;
+
+	vec4 viewSpacePos = gl_ProjectionMatrixInverse * pos;
+	viewSpacePos.xyz /= viewSpacePos.w;
+	viewSpacePos.w = 1.0;
+	
+	vec4 shadowMapCoords = (lightViewProjMatrix * viewSpacePos);
+	
+	vec3 distanceFromLight = viewSpacePos.xyz - lightPosition;    	
+    float attenuation = saturate(1.0 - sqrt(dot(distanceFromLight, distanceFromLight)) / lightRadius);
+        
+    float spotIntensity = 0.0;
+    
+    float spotFalloff = dot(lightDir, -normalize(viewSpacePos.xyz - lightPosition));
+    
+    if (spotFalloff > lightAngleCosine)
+    {
+		spotIntensity = pow(spotFalloff, lightDecayExponent);
+	}
+	      
+    float intensity = saturate(dot(normals.xyz,-normalize(distanceFromLight)));
+    vec3 outCol = lightColor * spotIntensity * intensity * diffuse.xyz;
+	
+	vec3 vsp = -normalize(viewSpacePos.xyz);
+    vec3 lightAngle = -normalize(distanceFromLight);
+	vec3 reflectVec = -normalize(reflect(lightAngle, normals));
+	float specular = max(0.0, dot(vsp,reflectVec));	
+	specular = pow(specular, 16.0) * attenuation;
+	
+	vec4 shadowMap = textureProj(spotTex, shadowMapCoords);	
+	
+#if 0
+	float shadow = ((textureSpaceVec[2] / textureSpaceVec[3]) > shadowMap[0] ? 0.0 : 1.0);
+	
+	gl_FragData[0].xyz = diffuse.xyz * lightColor * intensity * spotIntensity * shadow;
+	gl_FragData[0].w = 1.0;
+	gl_FragData[0] = vec4(specular * lightColor.x, specular * lightColor.y, specular * lightColor.z, 1.0) * spotIntensity * shadow;
+#endif
+
+// variance shadow maps.
+
+	float fragDepth = (shadowMapCoords[2] / shadowMapCoords[3]) - 0.5;
+	float lit_factor = (fragDepth <= shadowMap.x) ? 1.0 : 0.0; 	
+	float E_x2 = shadowMap.y;
+	float Ex_2 = shadowMap.x * shadowMap.x;	
+	
+	// An empirically determined value. 
+	float SHADOW_EPSILON = 0.005;
+	
+	float variance = min(max(E_x2 - Ex_2, 0.0) + SHADOW_EPSILON, 1.0);
+	float m_d = (shadowMap.x - fragDepth);
+	float p = variance / (variance + m_d * m_d); //Chebychev's inequality
+	
+	float shadowIntensity = max(lit_factor, p);	// FIXME: lighting factor?
+
+	gl_FragData[0].xyz = diffuse.xyz * lightColor * intensity * shadowIntensity * spotIntensity;
+	gl_FragData[0].w = 1.0;
+	gl_FragData[0] = vec4(specular * lightColor.x, specular * lightColor.y, specular * lightColor.z, 1) * intensity * shadowIntensity * spotIntensity;
+
+}

@@ -1,0 +1,36 @@
+[Vertex shader]
+#version 150
+
+varying vec3 norm;
+uniform vec3 scaleFactor;
+varying vec4 outPos;
+
+void main()
+{
+	vec4 temp = gl_Vertex;
+
+	gl_Position = gl_ModelViewProjectionMatrix * (temp);
+	outPos = gl_Position;
+}
+
+[Fragment shader]
+#version 150
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform vec3 lightPos;
+uniform vec3 camPos;
+uniform sampler2D baseTex;
+
+uniform float ambient;
+uniform sampler2D influenceTex;
+
+varying vec4 outPos;
+void main()
+{	
+   float z = (outPos.z / outPos.w);
+   vec4 lightColor = vec4(z, z*z, 0, 1); 
+   
+   gl_FragColor = lightColor;
+}

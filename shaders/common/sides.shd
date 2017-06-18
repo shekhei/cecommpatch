@@ -1,0 +1,40 @@
+[Vertex shader]
+
+varying vec3 norm;
+uniform vec3 scaleFactor;
+varying vec4 pixelPos;
+
+void main()
+{
+	vec4 temp = gl_Vertex;
+
+	gl_Position = gl_ModelViewProjectionMatrix * (temp);
+
+	// Lighting vectors
+	norm = mat3(RENDGL_MODELVIEWMatrix) * gl_Normal;
+	pixelPos = gl_Position;
+
+	gl_TexCoord[0] = gl_MultiTexCoord0;
+	gl_TexCoord[1] = gl_MultiTexCoord1;
+}
+
+[Fragment shader]
+
+#define saturate(x) clamp(x,0.0,1.0)
+#define lerp mix
+
+uniform sampler2D baseTex;
+uniform sampler2D influenceTex;
+
+
+varying vec3 norm;
+varying vec4 pixelPos;
+
+void main()
+{
+	vec4 landscape = texture(baseTex, vec2(gl_TexCoord[0]));
+	vec3 trueNorm = normalize(norm) * 0.5 + 0.5;	
+	gl_FragData[0] = landscape;
+	gl_FragData[0] = vec4(trueNorm.x,trueNorm.y,trueNorm.z,pixelPos.z);
+	gl_FragData[1] = vec4(0,0,0,0);
+}
